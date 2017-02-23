@@ -10,7 +10,7 @@
 # of testing.
 #
 # Example usage: $ sudo ./test/run
-IMAGE_NAME=${IMAGE_NAME:-dotnet/dotnetcore-11-rhel7}
+IMAGE_NAME=$1
 
 if [ "$DEBUG" != "" ]; then
   set -x
@@ -41,8 +41,9 @@ container_ip() {
 }
 
 run_s2i_build() {
-  info "Building the ${1} application image ..."
-  s2i build ${s2i_args} file://${test_dir}/${1} ${IMAGE_NAME} ${IMAGE_NAME}-testapp
+  info "Building the ${test_dir}/${1} application image ..."
+  cd ${test_dir}/${1}
+  s2i build ${s2i_args} . ${IMAGE_NAME} ${IMAGE_NAME}-testapp
 }
 
 prepare() {
@@ -207,7 +208,7 @@ test_web_application() {
   # Wait for the container to write it's CID file
   wait_for_cid
 
-  test_scl_usage "dotnet --version" "1.0.0-preview2-1-003175" "${cid_file}"
+  test_scl_usage "dotnet --version" "1.0.0-preview2-1-003177" "${cid_file}"
   check_result $?
 
   # Verify $HOME != $CWD. See https://github.com/redhat-developer/s2i-dotnetcore/issues/28
@@ -363,7 +364,7 @@ test_new_web_app() {
 
 # Since we built the candidate image locally, we don't want S2I attempt to pull
 # it from Docker hub
-s2i_args="--force-pull=false"
+s2i_args="--force-pull=false --loglevel 0"
 
 # Verify the 'usage' script is working properly when running the base image with 's2i usage ...'
 test_s2i_usage

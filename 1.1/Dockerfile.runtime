@@ -1,0 +1,86 @@
+FROM debian:jessie
+
+# This image provides a .NET Core 1.1 environment you can use to run your .NET
+# applications.
+	
+EXPOSE 8080
+
+ENV DOTNET_CORE_VERSION=1.1
+# Default to UTF-8 file.encoding
+ENV LANG=C.UTF-8 \
+    HOME=/opt/app-root \
+    PATH=/opt/app-root/src/.local/bin:/opt/app-root/src/bin:/opt/app-root/bin:/opt/app-root/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    STI_SCRIPTS_PATH=/usr/libexec/s2i \
+    DOTNET_PUBLISH_PATH=/opt/app-root/publish \
+    DOTNET_RUN_SCRIPT=/opt/app-root/publish/s2i_run
+
+LABEL io.k8s.description="Platform for building and running .NET Core 1.1 applications" \
+      io.k8s.display-name=".NET Core 1.1" \
+      io.openshift.s2i.scripts-url=image:///usr/libexec/s2i \
+      io.openshift.tags="builder,.net,dotnet,dotnetcore,rh-dotnetcore11" \
+      io.openshift.expose-services="8080:http" \
+      io.s2i.scripts-url=image:///usr/libexec/s2i
+
+COPY ./root/usr/bin /usr/bin
+
+# Copy the S2I scripts from the specific language image to $STI_SCRIPTS_PATH.
+COPY ./s2i/bin/ /usr/libexec/s2i
+
+# Each language image can have 'contrib' a directory with extra files needed to
+# run and build the applications.
+COPY ./contrib/ /opt/app-root
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        \
+# .NET Core dependencies
+        libc6 \
+        libcurl3 \
+        libgcc1 \
+        libgssapi-krb5-2 \
+        libicu52 \
+        liblttng-ust0 \
+        libssl1.0.0 \
+        libstdc++6 \
+        libunwind8 \
+        libuuid1 \
+        zlib1g \
+		curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /usr/libexec/s2i/assemble 
+
+# Install .NET Core Runtime
+ENV DOTNET_VERSION 1.1.0
+ENV DOTNET_DOWNLOAD_URL https://dotnetcli.blob.core.windows.net/dotnet/release/1.1.0/Binaries/$DOTNET_VERSION/dotnet-debian-x64.$DOTNET_VERSION.tar.gz
+
+RUN curl -SL $DOTNET_DOWNLOAD_URL --output dotnet.tar.gz \
+    && mkdir -p /usr/share/dotnet \
+    && tar -zxf dotnet.tar.gz -C /usr/share/dotnet \
+    && rm dotnet.tar.gz \
+    && ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet
+
+RUN mkdir -p /opt/app-root/publish && \
+    useradd -u 1001 -r -g 0 -d /opt/app-root/src -s /sbin/nologin \
+      -c "Default Application User" default && \
+    chown -R 1001:0 /opt/app-root
+
+
+# In order to drop the root user, we have to make some directories world
+# writable as OpenShift default security model is to run the container under
+# random UID.
+RUN chown -R 1001:0 /opt/app-root && chmod -R og+rwx /opt/app-root
+
+WORKDIR /opt/app-root/
+
+# Run container by default as user with id 1001 (default)
+USER 1001
+
+# By default, ASP.NET Core runs on port 5000. We configure it to match
+# the container port.
+ENV ASPNETCORE_URLS=http://*:8080
+
+ENTRYPOINT ["container-entrypoint"]
+
+# Set the default CMD to print the usage of the language image.
+CMD /usr/libexec/s2i/usage

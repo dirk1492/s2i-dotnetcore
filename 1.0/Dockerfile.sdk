@@ -1,7 +1,8 @@
-FROM rhel7
-# This image provides a .NET Core 1.0 environment you can use to run your .NET
-# applications.
+FROM debian:jessie
 
+# This image provides a .NET Core 1.1 environment you can use to run your .NET
+# applications.
+	
 EXPOSE 8080
 
 ENV DOTNET_CORE_VERSION=1.0
@@ -16,16 +17,8 @@ ENV LANG=C.UTF-8 \
 LABEL io.k8s.description="Platform for building and running .NET Core 1.0 applications" \
       io.k8s.display-name=".NET Core 1.0" \
       io.openshift.s2i.scripts-url=image:///usr/libexec/s2i \
-      io.openshift.tags="builder,.net,dotnet,dotnetcore,rh-dotnetcore10" \
-      io.openshift.expose-services="8080:http" \
+      io.openshift.tags="builder,.net,dotnet,dotnetcore,debian-dotnetcore11" \
       io.s2i.scripts-url=image:///usr/libexec/s2i
-
-# Labels consumed by Red Hat build service
-LABEL name="dotnet/dotnetcore-10-rhel7" \
-      com.redhat.component="rh-dotnetcore10-docker" \
-      version="1.0" \
-      release="12" \
-      architecture="x86_64"
 
 COPY ./root/usr/bin /usr/bin
 
@@ -36,31 +29,59 @@ COPY ./s2i/bin/ /usr/libexec/s2i
 # run and build the applications.
 COPY ./contrib/ /opt/app-root
 
-RUN yum install -y yum-utils && \
-    yum-config-manager --enable rhel-server-rhscl-7-rpms && \
-    yum-config-manager --enable rhel-7-server-dotnet-rpms && \
-    yum-config-manager --enable rhel-7-server-rpms && \
-    yum-config-manager --enable rhel-7-server-ose-3.0-rpms && \
-    yum install -y --setopt=tsflags=nodocs rh-dotnetcore10 nss_wrapper tar rh-nodejs4-npm && \
-    yum clean all && \
-    mkdir -p /opt/app-root/src /opt/app-root/publish && \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        \
+# .NET Core dependencies
+        libc6 \
+        libcurl3 \
+        libgcc1 \
+        libgssapi-krb5-2 \
+        libicu52 \
+        liblttng-ust0 \
+        libssl1.0.0 \
+        libstdc++6 \
+        libunwind8 \
+        libuuid1 \
+        zlib1g \
+	npm \
+	node \
+	curl \
+    && npm install -g bower \
+    && npm install -g gulp \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm /usr/libexec/s2i/assemble-runtime \
+    && rm /usr/libexec/s2i/run
+
+# Install .NET Core SDK
+ENV DOTNET_SDK_VERSION 1.0.0-preview2-003156
+ENV DOTNET_SDK_DOWNLOAD_URL https://dotnetcli.blob.core.windows.net/dotnet/preview/Binaries/$DOTNET_SDK_VERSION/dotnet-dev-debian-x64.$DOTNET_SDK_VERSION.tar.gz
+
+RUN curl -SL $DOTNET_SDK_DOWNLOAD_URL --output dotnet.tar.gz \
+    && mkdir -p /usr/share/dotnet \
+    && tar -zxf dotnet.tar.gz -C /usr/share/dotnet \
+    && rm dotnet.tar.gz \
+    && ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet
+
+RUN mkdir -p /opt/app-root/src /opt/app-root/publish && \
     useradd -u 1001 -r -g 0 -d /opt/app-root/src -s /sbin/nologin \
       -c "Default Application User" default && \
     chown -R 1001:0 /opt/app-root
-
+	
 # Switch to default app-user for cache population
 USER 1001
 
 # Don't download/extract docs for nuget packages
 ENV NUGET_XMLDOC_MODE=skip
 
-# - Initialize the .Net cache via 'scl enable rh-dotnetcore10 -- dotnet new'
+# - Initialize the .Net cache via 'scl enable rh-dotnetcore11 -- dotnet new'
 #   Move to the proper command to do this once https://github.com/dotnet/cli/issues/3692 is fixed.
 # - Removal of /tmp/NuGetScratch is needed due to:
 #   https://github.com/NuGet/Home/issues/2793
 RUN cd /opt/app-root/src && mkdir cache-warmup && \
     cd cache-warmup && \
-    scl enable rh-dotnetcore10 -- dotnet new && \
+    dotnet new && \
     cd .. && \
     rm -rf cache-warmup && \
     rm -rf /tmp/NuGetScratch
@@ -72,17 +93,6 @@ USER 0
 # writable as OpenShift default security model is to run the container under
 # random UID.
 RUN chown -R 1001:0 /opt/app-root && chmod -R og+rwx /opt/app-root
-
-# Get prefix path and path to scripts rather than hard-code them in scripts
-ENV CONTAINER_SCRIPTS_PATH=/opt/app-root \
-    ENABLED_COLLECTIONS="rh-dotnetcore10 rh-nodejs4"
-
-# When bash is started non-interactively, to run a shell script, for example it
-# looks for this variable and source the content of this file. This will enable
-# the SCL for all scripts without need to do 'scl enable'.
-ENV BASH_ENV=${CONTAINER_SCRIPTS_PATH}/etc/scl_enable \
-    ENV=${CONTAINER_SCRIPTS_PATH}/etc/scl_enable \
-    PROMPT_COMMAND=". ${CONTAINER_SCRIPTS_PATH}/etc/scl_enable"
 
 # Directory with the sources is set as the working directory. This should
 # be a folder outside $HOME as this might cause issues when compiling sources.
